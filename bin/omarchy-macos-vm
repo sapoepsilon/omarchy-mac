@@ -1,0 +1,101 @@
+#!/bin/bash
+# omarchy:summary=Set up a macOS VM on Apple Silicon (M1/M2), the counterpart of omarchy-windows-vm
+
+# The macOS VM stack is omvm (github.com/sapoepsilon/omvm): a side kernel with
+# KVM for macOS guests, the vmapple QEMU, a patched Honeykrisp and the omvm tool,
+# from omarchy-mac-pkgs's omarchy-macos-vm. install asks for it the way the
+# installer's box does (/etc/omarchy/macos-vm.enabled) and runs the setup
+# service now; the guest itself needs the one-time macOS step omvm prints.
+
+set -uo pipefail
+
+marker=/etc/omarchy/macos-vm.enabled
+state_dir=/var/lib/omarchy/macos-vm
+stack=(omvm qemu-vmapple mesa-honeykrisp-vmapple linux-aurora-vmapple)
+
+show_usage() {
+  cat <<'USAGE'
+Usage: omarchy-macos-vm <command>
+
+  install   install the macOS VM stack (side kernel, QEMU, omvm) and stage the macOS step
+  remove    remove the stack; guest images in ~/.local/share/omvm stay
+  status    what is installed and what is next
+USAGE
+}
+
+# M1 and M2 only: later Macs lock the PAuth registers a macOS guest needs.
+supported_mac() {
+  omarchy-hw-apple || return 1
+  grep -Eaq 'apple,(t8103|t6000|t6001|t6002|t8112|t6020|t6021|t6022)' "${OMARCHY_APPLE_COMPATIBLE:-/proc/device-tree/compatible}"
+}
+
+install_macos() {
+  supported_mac || {
+    echo "macOS VMs need an M1 or M2 Mac running Omarchy." >&2
+    exit 1
+  }
+  if [[ ! -e $marker ]]; then
+    sudo install -d -m 0755 "${marker%/*}" &&
+      printf '{"version":1,"requested_by":"menu"}\n' | sudo tee "$marker" >/dev/null || exit 1
+  fi
+  if omarchy-pkg-missing omarchy-macos-vm; then
+    omarchy-pkg-add omarchy-macos-vm || {
+      echo "omarchy-macos-vm is in no repository this Mac uses (see omarchy-mac-pkgs macos-vm BUILD.md)." >&2
+      exit 1
+    }
+  fi
+  sudo systemctl enable omarchy-macos-vm-setup.service >/dev/null 2>&1 || true
+  echo "Installing the macOS VM stack (the log follows; this can take a few minutes)..."
+  sudo systemctl start omarchy-macos-vm-setup.service &
+  local starter=$!
+  journalctl -f -n 0 -o cat -u omarchy-macos-vm-setup.service &
+  local follower=$!
+  wait "$starter"
+  local status=$?
+  kill "$follower" 2>/dev/null
+  if (( status == 0 )) && [[ -e $state_dir/done ]]; then
+    systemctl --user start omarchy-macos-vm-user.service 2>/dev/null || omvm prepare || true
+    echo
+    cat "$state_dir/next-steps.txt" 2>/dev/null
+  else
+    echo "The setup did not finish: $(sudo cat "$state_dir/last-error" 2>/dev/null || echo 'see journalctl -u omarchy-macos-vm-setup')" >&2
+    exit 1
+  fi
+}
+
+remove_macos() {
+  local installed=() package
+  for package in "${stack[@]}"; do
+    omarchy-pkg-present "$package" && installed+=("$package")
+  done
+  if (( ${#installed[@]} )); then
+    echo "This removes ${installed[*]}. Guest images in ~/.local/share/omvm stay."
+    gum confirm "Remove the macOS VM stack?" || exit 0
+    omarchy-pkg-remove "${installed[@]}" || exit 1
+  fi
+  sudo rm -f "$marker" "$state_dir/done"
+  echo "Removed. linux-aurora boots as before."
+}
+
+status_macos() {
+  local package
+  for package in omarchy-macos-vm "${stack[@]}"; do
+    if omarchy-pkg-present "$package"; then pacman -Q "$package"; else echo "$package: not installed"; fi
+  done
+  [[ -e $marker ]] && echo "requested: $(cat "$marker")"
+  [[ -e $state_dir/done ]] && cat "$state_dir/next-steps.txt" 2>/dev/null
+  command -v omvm >/dev/null && omvm doctor
+  return 0
+}
+
+case "${1:-}" in
+install) install_macos ;;
+remove) remove_macos ;;
+status) status_macos ;;
+help | --help | -h | "") show_usage ;;
+*)
+  echo "Unknown command: $1" >&2
+  show_usage >&2
+  exit 1
+  ;;
+esac

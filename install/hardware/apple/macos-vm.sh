@@ -23,8 +23,11 @@ fi
 if omarchy-pkg-missing omarchy-macos-vm; then
   echo "Installing the macOS VM first-boot hook"
   # A private payload carries the hook beside the rest of the stack.
-  hook_archive=$(ls /var/lib/omarchy/macos-vm/repo/omarchy-macos-vm-[0-9]*.pkg.tar.* \
-    /boot/efi/omarchy/macos-vm/repo/omarchy-macos-vm-[0-9]*.pkg.tar.* 2>/dev/null | grep -v '\.sig$' | tail -n 1)
+  hook_archive=""
+  for candidate in /var/lib/omarchy/macos-vm/repo/omarchy-macos-vm-[0-9]*.pkg.tar.* \
+    /boot/efi/omarchy/macos-vm/repo/omarchy-macos-vm-[0-9]*.pkg.tar.*; do
+    [[ -f $candidate && $candidate != *.sig ]] && hook_archive=$candidate
+  done
   if [[ -n $hook_archive ]]; then
     sudo pacman -U --needed --noconfirm "$hook_archive" ||
       echo "Warning: could not install $hook_archive; no macOS VM setup." >&2

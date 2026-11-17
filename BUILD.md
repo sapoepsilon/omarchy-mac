@@ -5,7 +5,8 @@ This branch wires the owner's macOS guest VM stack ([omvm](https://github.com/sa
 ## What this branch adds
 
 - `install/hardware/apple/macos-vm.sh`, run from `install/hardware/all.sh`: on an Apple Silicon Mac whose install asked for macOS VMs (`/etc/omarchy/macos-vm.enabled`, or `OMARCHY_MACOS_VM=1` for a script install, which writes it), installs the `omarchy-macos-vm` hook package (from `/var/lib/omarchy/macos-vm/repo/`, `/boot/efi/omarchy/macos-vm/repo/`, or a configured repository) and enables `omarchy-macos-vm-setup.service`. That service installs the rest at the next boot. Without the request the leaf does nothing.
-- `test/shell.d/apple-macos-vm-test.sh`.
+- `bin/omarchy-macos-vm install|remove|status`, the counterpart of `omarchy-windows-vm` (which refuses Apple Silicon), and the menu rows beside Windows: **Install > macOS** (shown only on Apple Silicon, dimmed once set up; M1/M2 only, the command refuses later Macs) and **Remove > macOS**. `install` writes the same request as the installer's box, installs the hook and runs its setup service with the log on screen; `remove` removes the four stack packages and the request, keeping guest images.
+- `test/shell.d/apple-macos-vm-test.sh`, and `menu-test.sh` taught the new rows.
 
 ## How an image gets it
 

@@ -50,3 +50,19 @@ pass "a request installs omarchy-macos-vm and enables its setup service"
 COMPATIBLE=$test_tmp/pi run_leaf
 [[ ! -s $log ]] || fail "a non-Apple aarch64 board is left alone" "$(cat "$log")"
 pass "only Apple Silicon Macs get the macOS VM hook"
+
+# omarchy-macos-vm, the menu's counterpart of omarchy-windows-vm.
+command=$ROOT/bin/omarchy-macos-vm
+grep -Fq "'omarchy-macos-vm install'" "$ROOT/default/omarchy/omarchy-menu.jsonc" &&
+  grep -Fq "'omarchy-macos-vm remove'" "$ROOT/default/omarchy/omarchy-menu.jsonc" ||
+  fail "Install and Remove offer macOS beside Windows"
+stub omarchy-hw-apple 'exit 0'
+printf 'apple,j314s\0apple,t6000\0apple,arm-platform\0' >"$test_tmp/m1"
+printf 'apple,j614s\0apple,t6040\0apple,arm-platform\0' >"$test_tmp/m4"
+set +e
+OMARCHY_APPLE_COMPATIBLE=$test_tmp/m4 PATH="$stub_bin:$PATH" bash "$command" install >"$test_tmp/out" 2>&1
+status=$?
+set -e
+(( status == 1 )) && grep -Fq 'M1 or M2' "$test_tmp/out" || fail "install refuses a Mac after M2" "$(cat "$test_tmp/out")"
+PATH="$stub_bin:$PATH" bash "$command" help | grep -Fq 'install' || fail "the command prints its usage"
+pass "omarchy-macos-vm install refuses Macs after M2 and is in the menu beside Windows"

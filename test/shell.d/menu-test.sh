@@ -269,7 +269,7 @@ assertDeepEqual(
   defaultItems
     .filter(item => item.id.startsWith('install.') && item.action && item.when)
     .map(item => item.id),
-  ['install.service.chromium-account', 'install.gaming.steam'],
+  ['install.macos', 'install.service.chromium-account', 'install.gaming.steam'],
   'menu never hides an Install row because the software is already there'
 )
 assert(
@@ -289,6 +289,12 @@ assert(
   defaultById['install.service.chromium-account'].when === '[[ -f ~/.config/chromium-flags.conf ]]'
     && defaultById['install.service.chromium-account'].disabled.includes('oauth2-client-id'),
   'menu keeps hiding Chromium Account without Chromium, and dims it once the account is set up'
+)
+// macOS VMs need an Apple Silicon Mac: the row hides elsewhere and dims once set up.
+assert(
+  defaultById['install.macos'].when === 'omarchy-hw-apple'
+    && defaultById['install.macos'].disabled === '[[ -f /var/lib/omarchy/macos-vm/done ]]',
+  'menu offers macOS only on Apple Silicon, and dims it once the stack is set up'
 )
 assert(
   defaultItems.filter(item => item.id.startsWith('remove.')).every(item => !item.disabled)
@@ -310,6 +316,7 @@ assertDeepEqual(
     'remove.webapp',
     'remove.tui',
     'remove.windows',
+    'remove.macos',
     'remove.preinstalls',
     'remove.security'
   ],
