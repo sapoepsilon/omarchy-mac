@@ -10,8 +10,10 @@
 set -uo pipefail
 
 marker=/etc/omarchy/macos-vm.enabled
-state_dir=/var/lib/omarchy/macos-vm
+state_dir=${OMARCHY_MACOS_VM_STATE:-/var/lib/omarchy/macos-vm}
 stack=(omvm qemu-vmapple mesa-honeykrisp-vmapple linux-aurora-vmapple)
+desktop_file=$HOME/.local/share/applications/macos-vm.desktop
+vm_name=${OMVM_VM:-macos}
 
 show_usage() {
   cat <<'USAGE'
@@ -19,6 +21,8 @@ Usage: omarchy-macos-vm <command>
 
   install   install the macOS VM stack (side kernel, QEMU, omvm) and stage the macOS step
   remove    remove the stack; guest images in ~/.local/share/omvm stay
+  launch    start the VM if needed and bring its window to the front (omvm show)
+  stop      shut the VM down
   status    what is installed and what is next
 USAGE
 }
@@ -27,6 +31,53 @@ USAGE
 supported_mac() {
   omarchy-hw-apple || return 1
   grep -Eaq 'apple,(t8103|t6000|t6001|t6002|t8112|t6020|t6021|t6022)' "${OMARCHY_APPLE_COMPATIBLE:-/proc/device-tree/compatible}"
+}
+
+# The launcher entry, like windows-vm.desktop: "macOS" in Super + Space.
+write_desktop_entry() {
+  mkdir -p "${desktop_file%/*}"
+  cat >"$desktop_file" <<'EOF'
+[Desktop Entry]
+Name=macOS
+Comment=Start the macOS VM (omvm) and bring its window to the front
+Exec=uwsm app -- omarchy-macos-vm launch
+Icon=macos
+Terminal=false
+Type=Application
+Categories=System;Virtualization;
+Keywords=omvm;macOS;VM;
+EOF
+}
+
+# The VM exists once omvm virt defined it in libvirt; omvm mode names its display.
+vm_exists() { command -v omvm >/dev/null && omvm mode "$vm_name" >/dev/null 2>&1; }
+
+launch_macos() {
+  local steps
+  if ! vm_exists; then
+    if [[ -s $state_dir/next-steps.txt ]]; then
+      steps=$(cat "$state_dir/next-steps.txt")
+    elif [[ -e $state_dir/done ]]; then
+      steps="Create it: omvm ingest && omvm setup --xcode, then omvm virt $vm_name."
+    else
+      steps="Set up the stack first: Install > macOS in the Omarchy menu."
+    fi
+    printf 'The macOS VM %s does not exist yet.\n%s\n' "$vm_name" "$steps" >&2
+    omarchy-notification-send -u critical -t 0 "macOS VM not set up yet" "$steps" || true
+    exit 1
+  fi
+  if ! omvm show "$vm_name"; then
+    omarchy-notification-send -u critical "macOS VM" "Could not bring up the macOS VM; see omarchy-macos-vm status" || true
+    exit 1
+  fi
+}
+
+stop_macos() {
+  if vm_exists; then
+    omvm stop "$vm_name"
+  else
+    echo "The macOS VM $vm_name does not exist yet."
+  fi
 }
 
 install_macos() {
@@ -55,8 +106,11 @@ install_macos() {
   kill "$follower" 2>/dev/null
   if (( status == 0 )) && [[ -e $state_dir/done ]]; then
     systemctl --user start omarchy-macos-vm-user.service 2>/dev/null || omvm prepare || true
+    write_desktop_entry
     echo
     cat "$state_dir/next-steps.txt" 2>/dev/null
+    echo
+    echo "Once the VM exists, launch 'macOS' via Super + Space"
   else
     echo "The setup did not finish: $(sudo cat "$state_dir/last-error" 2>/dev/null || echo 'see journalctl -u omarchy-macos-vm-setup')" >&2
     exit 1
@@ -74,6 +128,7 @@ remove_macos() {
     omarchy-pkg-remove "${installed[@]}" || exit 1
   fi
   sudo rm -f "$marker" "$state_dir/done"
+  rm -f "$desktop_file"
   echo "Removed. linux-aurora boots as before."
 }
 
@@ -91,6 +146,8 @@ status_macos() {
 case "${1:-}" in
 install) install_macos ;;
 remove) remove_macos ;;
+launch | start) launch_macos ;;
+stop | down) stop_macos ;;
 status) status_macos ;;
 help | --help | -h | "") show_usage ;;
 *)
