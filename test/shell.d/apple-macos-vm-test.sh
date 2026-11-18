@@ -70,7 +70,7 @@ pass "omarchy-macos-vm install refuses Macs after M2 and is in the menu beside W
 # launch: the "macOS" launcher entry. Without a VM it shows omvm's next steps.
 state=$test_tmp/state
 mkdir -p "$state"
-printf 'Boot macOS once, then omvm ingest\n' >"$state/next-steps.txt"
+printf 'The one-time macOS step\n\n1. Boot macOS once\n2. omvm ingest\n' >"$state/next-steps.txt"
 stub omarchy-notification-send 'printf "notify %s\n" "$*" >>"$TEST_LOG"'
 stub omvm 'echo "omvm $*" >>"$TEST_LOG"; [[ $1 != mode || -n ${TEST_VM:-} ]]'
 run_launch() {
@@ -83,7 +83,7 @@ run_launch() {
 }
 run_launch
 (( status == 1 )) || fail "launch without a VM fails" "$(cat "$test_tmp/out")"
-grep -q '^notify .*macOS VM not set up yet.*Boot macOS once' "$log" || fail "launch without a VM shows the next steps" "$(cat "$log")"
+grep -q "^notify .*macOS VM not set up yet 1. Boot macOS once" "$log" && grep -q -- "--exec .*cat $state/next-steps.txt" "$log" || fail "launch without a VM shows the next steps, and a click opens them all" "$(cat "$log")"
 ! grep -q '^omvm show' "$log" || fail "launch without a VM does not call omvm show" "$(cat "$log")"
 TEST_VM=1 run_launch
 (( status == 0 )) && grep -Fxq 'omvm show macos' "$log" || fail "launch brings the VM up with omvm show" "$(cat "$log")"

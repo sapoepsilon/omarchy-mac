@@ -53,17 +53,21 @@ EOF
 vm_exists() { command -v omvm >/dev/null && omvm mode "$vm_name" >/dev/null 2>&1; }
 
 launch_macos() {
-  local steps
+  local steps open=()
   if ! vm_exists; then
     if [[ -s $state_dir/next-steps.txt ]]; then
-      steps=$(cat "$state_dir/next-steps.txt")
+      # The numbered steps fit a notification; a click shows the whole file.
+      steps=$(grep -E '^[0-9]+\.' "$state_dir/next-steps.txt" | tr -s ' ')
+      [[ -n $steps ]] || steps=$(cat "$state_dir/next-steps.txt")
+      open=(--exec omarchy-launch-floating-terminal-with-presentation "cat $state_dir/next-steps.txt")
     elif [[ -e $state_dir/done ]]; then
       steps="Create it: omvm ingest && omvm setup --xcode, then omvm virt $vm_name."
     else
       steps="Set up the stack first: Install > macOS in the Omarchy menu."
     fi
-    printf 'The macOS VM %s does not exist yet.\n%s\n' "$vm_name" "$steps" >&2
-    omarchy-notification-send -u critical -t 0 "macOS VM not set up yet" "$steps" || true
+    printf 'The macOS VM %s does not exist yet.\n' "$vm_name" >&2
+    cat "$state_dir/next-steps.txt" >&2 2>/dev/null || echo "$steps" >&2
+    omarchy-notification-send -u critical -t 0 "macOS VM not set up yet" "$steps" "${open[@]}" || true
     exit 1
   fi
   if ! omvm show "$vm_name"; then
