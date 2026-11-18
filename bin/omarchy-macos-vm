@@ -7,11 +7,15 @@
 # omvm (github.com/sapoepsilon/omvm): a side kernel with KVM for macOS guests,
 # the vmapple QEMU, a patched Honeykrisp and the omvm tool, from
 # omarchy-mac-pkgs's omarchy-macos-vm. The guest itself needs one boot into
-# macOS (omvm's run-on-macos.sh restores it with Apple's Virtualization
-# framework onto the VMXFER partition); everything after that is automated:
-# create (ingest -> setup -> virt) runs from install when the restored VM is
-# already on VMXFER, and otherwise from the next Omarchy login after the macOS
-# step (omarchy-macos-vm-create.service, in the omarchy-macos-vm package).
+# macOS (the developer installer's "Set up a macOS VM" tick does it before the
+# first boot; otherwise omvm's run-on-macos.sh, the one-time macOS step):
+# Apple's Virtualization framework restores it onto the VMXFER partition.
+# Everything after that is automated: create (ingest -> setup -> virt) runs
+# from install when the restored VM is already on VMXFER, and otherwise at
+# each Omarchy login until it exists (omarchy-macos-vm-create.service, in the
+# omarchy-macos-vm package, runs `create --auto` in the background). setup
+# needs the side kernel; omarchy-macos-vm-vmxfer.service arranges for it to
+# boot once by itself, so all that is left to the owner is one restart.
 
 set -uo pipefail
 
@@ -45,7 +49,8 @@ Commands:
                          --keep-alive, -k   Keep VM running after its window closes
   stop                 Stop the running macOS VM
   status               Show current VM status
-  create               Finish the VM after the one-time macOS step (ingest, setup, virt)
+  create [--auto]      Finish the VM after the macOS step (ingest, setup, virt);
+                       --auto picks the account, RAM and cores without asking
   help                 Show this help message
 
 Examples:
@@ -102,6 +107,19 @@ bundle_ingested() { compgen -G "$omvm_images/*-restore/.ingested" >/dev/null; }
 # VMXFER for the macOS step's output and leaves this stamp when it is there.
 vmxfer_ready() { [[ -e $state_dir/vmxfer-ready ]]; }
 on_side_kernel() { [[ -e $side_kernel_param ]]; }
+# omarchy-macos-vm-vmxfer.service keeps VMXFER mounted read-only here, so
+# omvm ingest needs no sudo password, and arms one boot of the side kernel.
+vmxfer_mount() { sed -n 's/^mount=//p' "$state_dir/vmxfer-ready" 2>/dev/null | tail -1; }
+oneshot_armed() { [[ -e $state_dir/oneshot-armed ]]; }
+
+# What to do on the stock kernel once the VM is imported.
+restart_step() {
+  if oneshot_armed; then
+    echo "Restart once: Omarchy starts $side_kernel by itself and finishes the VM at the next login."
+  else
+    echo "Boot $side_kernel from the Limine menu; the VM is finished at the next login."
+  fi
+}
 
 # The VM exists once omvm virt defined it in libvirt; omvm mode names its display.
 vm_exists() { command -v omvm >/dev/null && omvm mode "$vm_name" >/dev/null 2>&1; }
@@ -160,7 +178,7 @@ pending_step() {
     echo "Set up the stack first: Install > macOS in the Omarchy menu."
   elif bundle_ingested || vmxfer_ready; then
     if bundle_ingested && ! on_side_kernel; then
-      echo "Boot $side_kernel from the Limine menu; the VM is finished at the next login."
+      restart_step
     else
       echo "Finish it: omarchy-macos-vm create (ingest, setup, virt)."
     fi
@@ -361,9 +379,29 @@ install_macos() {
   echo "Once finished, launch 'macOS' via Super + Space"
 }
 
+# --auto, at login with nobody at a terminal: the guest account is this
+# user's name and the VM gets half the RAM (4-16G) and all but two cores (2-8),
+# unless omarchy-macos-vm install already chose them.
+auto_defaults() {
+  if [[ -z $(guest_user) ]] && valid_account "$(id -un)"; then
+    save_guest_user "$(id -un)" || return 1
+  fi
+  [[ -s $config_file ]] && return 0
+  local ram cpus
+  ram=$(awk 'NR==1 {printf "%d", $2/1024/1024/2}' "${OMARCHY_MACOS_VM_MEMINFO:-/proc/meminfo}")
+  ((ram > 16)) && ram=16
+  ((ram < 4)) && ram=4
+  cpus=$(($(nproc) - 2))
+  ((cpus > 8)) && cpus=8
+  ((cpus < 2)) && cpus=2
+  save_settings "$ram" "$cpus"
+}
+
 # ingest -> setup [--xcode] -> virt, each step skipped once done. Runs from
-# install, from the next login after the macOS step, or by hand.
+# install, from each login until the VM exists (--auto), or by hand.
 create_macos() {
+  local auto=0
+  [[ ${1:-} == --auto ]] && auto=1
   if vm_exists; then
     echo "The macOS VM $vm_name already exists. Launch 'macOS' via Super + Space"
     return 0
@@ -377,8 +415,23 @@ create_macos() {
     return 1
   fi
   mkdir -p "$user_state"
+  if ((auto)); then
+    auto_defaults || {
+      echo "❌ Failed to save the macOS VM settings." >&2
+      return 1
+    }
+  fi
 
   if ! bundle_ingested; then
+    local available mnt
+    available=$(available_storage_gb) || available=0
+    if ((available < REQUIRED_SPACE_GB)); then
+      echo "❌ ${available}GB free; the macOS VM needs ${REQUIRED_SPACE_GB}GB in Omarchy." >&2
+      notify -u critical "macOS VM: not enough space" "It needs ${REQUIRED_SPACE_GB} GB free in Omarchy; ${available} GB is free."
+      return 1
+    fi
+    mnt=$(vmxfer_mount)
+    [[ -n $mnt && -d $mnt ]] && export MNT=$mnt
     notify "Creating the macOS VM" "Importing the VM restored in macOS (omvm ingest)"
     echo "Importing the VM restored in macOS (omvm ingest; this can take 10-20 minutes)..."
     omvm ingest || {
@@ -389,9 +442,9 @@ create_macos() {
   fi
   if ! on_side_kernel; then
     echo ""
-    echo "The rest needs the macOS VM kernel: boot $side_kernel from the Limine menu."
-    echo "The VM is finished automatically at the next login."
-    notify -u critical -t 0 "macOS VM: reboot to finish" "Boot $side_kernel from the Limine menu; the VM is finished at the next login."
+    echo "The rest needs the macOS VM kernel ($side_kernel)."
+    restart_step
+    notify -u critical -t 0 "macOS VM: reboot to finish" "$(restart_step)"
     return 2
   fi
 
@@ -597,7 +650,7 @@ status_macos() {
 
 case "${1:-}" in
 install) install_macos ;;
-create) create_macos ;;
+create) create_macos "${2:-}" ;;
 remove) remove_macos "${2:-}" ;;
 launch | start) launch_macos "${2:-}" ;;
 stop | down) stop_macos ;;

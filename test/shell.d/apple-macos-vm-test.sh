@@ -80,7 +80,7 @@ printf 'The one-time macOS step\n\n1. Boot macOS once\n2. omvm ingest\n' >"$stat
 stub omarchy-notification-send 'printf "notify %s\n" "$*" >>"$TEST_LOG"'
 stub omarchy-pkg-add 'echo "pkg-add $*" >>"$TEST_LOG"'
 stub omarchy-pkg-remove 'echo "pkg-remove $*" >>"$TEST_LOG"'
-stub omvm 'echo "omvm $* CPUS=${CPUS:-} RAM_GIB=${RAM_GIB:-}" >>"$TEST_LOG"
+stub omvm 'echo "omvm $* CPUS=${CPUS:-} RAM_GIB=${RAM_GIB:-} MNT=${MNT:-}" >>"$TEST_LOG"
 case $1 in
   mode) [[ -e $TEST_VMDIR/exists ]] && echo remote ;;
   start) echo running >"$TEST_VMDIR/state" ;;
@@ -183,6 +183,30 @@ run_cmd install
 grep -q '^omvm virt macos CPUS=6 RAM_GIB=16' "$log" && ! grep -q '^gum input .*account' "$log" ||
   fail "install on an existing VM redefines it with the new settings" "$(cat "$log")"
 pass "omarchy-macos-vm create ingests, waits for the side kernel, then sets up and defines the VM"
+
+# create --auto (the login service): no questions; the account, RAM and cores
+# are chosen, ingest reads the root-held VMXFER mount, and once the side kernel
+# is armed for one boot the stock kernel only asks for a restart.
+reset_vm
+mkdir -p "$test_tmp/vmxfer-mnt"
+printf 'device=/dev/nvme0n1p3\nmount=%s\n' "$test_tmp/vmxfer-mnt" >"$state/vmxfer-ready"
+touch "$state/oneshot-armed"
+printf 'MemTotal:       65536000 kB\n' >"$test_tmp/meminfo"
+OMARCHY_MACOS_VM_MEMINFO="$test_tmp/meminfo" run_cmd create --auto
+(( status == 2 )) && grep -q "^omvm ingest .*MNT=$test_tmp/vmxfer-mnt" "$log" ||
+  fail "create --auto ingests from the mount the vmxfer service holds" "$(cat "$test_tmp/out"; cat "$log")"
+grep -q '^notify .*reboot to finish Restart once: Omarchy starts linux-aurora-vmapple by itself' "$log" ||
+  fail "create --auto on the stock kernel asks for one restart when the side kernel is armed" "$(cat "$log")"
+grep -Fxq "OMVM_GUEST_USER=$(id -un)" "$home/.config/omvm/gui.env" &&
+  grep -Fxq 'RAM_GIB=16' "$home/.config/omarchy/macos-vm.conf" ||
+  fail "create --auto saves the account and resources" "$(cat "$home/.config/omvm/gui.env" "$home/.config/omarchy/macos-vm.conf" 2>&1)"
+! grep -q '^gum' "$log" || fail "create --auto never asks" "$(cat "$log")"
+rm -f "$state/oneshot-armed"
+touch "$kvm_param"
+OMARCHY_MACOS_VM_MEMINFO="$test_tmp/meminfo" run_cmd create --auto
+(( status == 0 )) && grep -q '^omvm setup  *CPUS' "$log" && grep -q '^omvm virt macos CPUS=[2-8] RAM_GIB=16' "$log" ||
+  fail "create --auto on the side kernel sets up (no Xcode) and defines the VM" "$(cat "$log")"
+pass "omarchy-macos-vm create --auto finishes the VM without a terminal and asks only for one restart"
 
 # status, stop and remove.
 echo running >"$vm/state"
