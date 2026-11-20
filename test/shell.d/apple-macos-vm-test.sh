@@ -23,7 +23,7 @@ stub omarchy-pkg-missing '[[ ! -e $TEST_INSTALLED ]]'
 stub omarchy-pkg-present '[[ -e $TEST_INSTALLED ]]'
 stub omarchy-pkg-add 'echo "pkg-add $*" >>"$TEST_LOG"; touch "$TEST_INSTALLED"'
 stub sudo '"$@"'
-stub systemctl 'echo "systemctl $*" >>"$TEST_LOG"'
+stub systemctl 'echo "systemctl $*" >>"$TEST_LOG"; [[ $* != *is-active* ]]'
 stub pacman 'echo "pacman $*" >>"$TEST_LOG"; touch "$TEST_INSTALLED"'
 
 run_leaf() {
@@ -112,7 +112,7 @@ run_cmd() {
     HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.local/state" XDG_DATA_HOME="$home/.local/share" \
     OMVM_IMAGES="$images" OMARCHY_MACOS_VM_STATE="$state" OMARCHY_MACOS_VM_MARKER="$test_tmp/etc/omarchy/macos-vm.enabled" \
     OMARCHY_MACOS_VM_KVM_PARAM="$kvm_param" OMARCHY_APPLE_COMPATIBLE="$test_tmp/m1" OMARCHY_MACOS_VM_REQUIRED_GB=0 \
-    OMARCHY_MACOS_VM_POLL=0 OMARCHY_MACOS_VM_BOOT_TIMEOUT=6 \
+    OMARCHY_MACOS_VM_POLL=0 OMARCHY_MACOS_VM_BOOT_TIMEOUT=6 OMARCHY_MACOS_VM_NOTIFY_WAIT=0 OMARCHY_MACOS_VM_NO_LAUNCH=1 \
     bash "$command" "$@" >"$test_tmp/out" 2>&1
   status=$?
   set -e
@@ -172,13 +172,13 @@ mkdir -p "$home/.config/omarchy"; printf 'RAM_GIB=32\nCPUS=4\n' >"$home/.config/
 touch "$state/vmxfer-ready"
 run_cmd create
 (( status == 2 )) && grep -q '^omvm ingest' "$log" && ! grep -q '^omvm setup' "$log" &&
-  grep -q '^notify .*reboot to finish' "$log" || fail "create on the stock kernel ingests and asks for the side kernel" "$(cat "$log")"
+  grep -q '^notify .*restart to finish' "$log" || fail "create on the stock kernel ingests and asks for the side kernel" "$(cat "$log")"
 touch "$kvm_param" "$images/Xcode.dmg"
 run_cmd create
 (( status == 0 )) || fail "create on the side kernel succeeds" "$(cat "$test_tmp/out")"
 ! grep -q '^omvm ingest' "$log" && grep -q '^omvm setup --xcode' "$log" && grep -q '^omvm virt macos CPUS=4 RAM_GIB=32' "$log" ||
   fail "create runs setup --xcode, then virt with the saved RAM and cores" "$(cat "$log")"
-[[ -s $home/.local/state/omarchy-macos-vm/vm-created ]] && grep -q '^notify macOS VM is ready' "$log" || fail "create says the VM is ready"
+[[ -s $home/.local/state/omarchy-macos-vm/vm-created ]] && grep -q '^notify macOS VM ready — open it from Super+Space' "$log" || fail "create says the VM is ready"
 run_cmd install
 grep -q '^omvm virt macos CPUS=6 RAM_GIB=16' "$log" && ! grep -q '^gum input .*account' "$log" ||
   fail "install on an existing VM redefines it with the new settings" "$(cat "$log")"
@@ -195,7 +195,7 @@ printf 'MemTotal:       65536000 kB\n' >"$test_tmp/meminfo"
 OMARCHY_MACOS_VM_MEMINFO="$test_tmp/meminfo" run_cmd create --auto
 (( status == 2 )) && grep -q "^omvm ingest .*MNT=$test_tmp/vmxfer-mnt" "$log" ||
   fail "create --auto ingests from the mount the vmxfer service holds" "$(cat "$test_tmp/out"; cat "$log")"
-grep -q '^notify .*reboot to finish Restart once: Omarchy starts linux-aurora-vmapple by itself' "$log" ||
+grep -q '^notify .*restart to finish Restart once: Omarchy starts linux-aurora-vmapple by itself' "$log" ||
   fail "create --auto on the stock kernel asks for one restart when the side kernel is armed" "$(cat "$log")"
 grep -Fxq "OMVM_GUEST_USER=$(id -un)" "$home/.config/omvm/gui.env" &&
   grep -Fxq 'RAM_GIB=16' "$home/.config/omarchy/macos-vm.conf" ||
