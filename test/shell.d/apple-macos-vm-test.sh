@@ -158,13 +158,25 @@ grep -q '^gum choose .*RAM' "$log" && grep -q '^gum input .*CPU cores' "$log" &&
 grep -Fxq 'RAM_GIB=16' "$home/.config/omarchy/macos-vm.conf" && grep -Fxq 'CPUS=6' "$home/.config/omarchy/macos-vm.conf" ||
   fail "install saves RAM and cores" "$(cat "$home/.config/omarchy/macos-vm.conf" 2>&1)"
 grep -Fxq 'OMVM_GUEST_USER=alice' "$home/.config/omvm/gui.env" || fail "install saves the guest account for omvm"
+[[ $(<"$home/.config/omarchy/macos-vm-credentials") == $'USERNAME=alice\nPASSWORD=macos' &&
+  $(stat -c %a "$home/.config/omarchy/macos-vm-credentials") == 600 ]] ||
+  fail "a blank password is the default macos, kept 0600 with the username" "$(cat "$home/.config/omarchy/macos-vm-credentials" 2>&1)"
+[[ $(<"$home/.local/share/omvm/guest-password") == macos ]] || fail "install hands the password to omvm"
+grep -Fq 'Username:  alice' "$test_tmp/out" && grep -Fq 'Password:  (default: macos)' "$test_tmp/out" ||
+  fail "the summary shows the username and the default password" "$(cat "$test_tmp/out")"
+TEST_PASSWORD="it's" run_cmd install
+grep -Fxq 'PASSWORD=macos' "$home/.config/omarchy/macos-vm-credentials" && grep -Fq "Invalid password" "$test_tmp/out" ||
+  fail "a password with ' falls back to the default" "$(cat "$test_tmp/out")"
+TEST_PASSWORD='s3cret pw' run_cmd install
+grep -Fxq 'PASSWORD=s3cret pw' "$home/.config/omarchy/macos-vm-credentials" && grep -Fq 'Password:  (user-defined)' "$test_tmp/out" ||
+  fail "a typed password is kept" "$(cat "$test_tmp/out")"
 grep -Fxq 'Exec=uwsm app -- omarchy-macos-vm launch' "$home/.local/share/applications/macos-vm.desktop" || fail "install adds the launcher entry"
 grep -q '^notify .*one step in macOS' "$log" && grep -Fq 'runs at the next Omarchy login' "$test_tmp/out" ||
   fail "without the restored VM install tells the macOS step and that the rest follows at login" "$(cat "$test_tmp/out")"
 ! grep -q '^omvm \(ingest\|setup\|virt\)' "$log" || fail "without the restored VM nothing is created" "$(cat "$log")"
 TEST_CONFIRM=n run_cmd install
 (( status == 1 )) && grep -Fq 'Installation cancelled by user' "$test_tmp/out" || fail "a declined summary cancels"
-pass "omarchy-macos-vm install asks RAM, cores, account and confirmation, saves them, and stages the macOS step"
+pass "omarchy-macos-vm install asks RAM, cores, username and password (default macos), saves them 0600, and stages the macOS step"
 
 # create: ingest; on the stock kernel stop and ask for the side kernel; then setup + virt.
 reset_vm
@@ -212,6 +224,8 @@ pass "omarchy-macos-vm create --auto finishes the VM without a terminal and asks
 echo running >"$vm/state"
 run_cmd status
 (( status == 0 )) && grep -Fq 'macOS VM Status: RUNNING' "$test_tmp/out" || fail "status shows a running VM" "$(cat "$test_tmp/out")"
+grep -Fxq "Username:  $(id -un)" "$test_tmp/out" && grep -Fxq 'Password:  macos' "$test_tmp/out" ||
+  fail "status shows the username and password, like the Windows VM" "$(cat "$test_tmp/out")"
 run_cmd stop
 grep -q '^omvm stop macos' "$log" && grep -Fq 'macOS VM stopped.' "$test_tmp/out" || fail "stop stops the VM"
 run_cmd status
