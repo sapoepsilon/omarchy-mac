@@ -720,6 +720,9 @@
   "install.windows": {
     "label": "Windows"
   },
+  "install.macos": {
+    "label": "macOS"
+  },
   "install.aur": {
     "label": "AUR"
   },
@@ -994,6 +997,9 @@
   },
   "remove.windows": {
     "label": "Windows"
+  },
+  "remove.macos": {
+    "label": "macOS"
   },
   "remove.preinstalls": {
     "label": "Preinstalls"

@@ -67,6 +67,7 @@ omarchy_is_aarch64_leaf() {
       hardware/hp/fix-hp-omnibook-x14-boot.sh | \
       hardware/lenovo/fix-lenovo-ideacentre-mini-boot.sh | \
       hardware/fix-n1x-gpu-memory.sh | \
+      hardware/apple/macos-vm.sh | \
       hardware/raspberrypi/raspberry-pi-4.sh | \
       hardware/qualcomm/dtb-uki.sh | \
       hardware/qualcomm/kernel-params.sh | \

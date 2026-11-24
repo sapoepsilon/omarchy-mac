@@ -62,6 +62,7 @@ run_logged "$OMARCHY_INSTALL/hardware/apple/fix-suspend-nvme.sh"
 run_logged "$OMARCHY_INSTALL/hardware/apple/fix-t2.sh"
 run_logged "$OMARCHY_INSTALL/hardware/apple/fix-brcmfmac-supplicant.sh"
 run_logged "$OMARCHY_INSTALL/hardware/apple/fix-facetimehd.sh"
+run_logged "$OMARCHY_INSTALL/hardware/apple/macos-vm.sh"
 
 # These write boot settings and build nothing, like n1x.sh: the installer's
 # final limine-update builds the UKIs, and an image's first boot rebuilds once
