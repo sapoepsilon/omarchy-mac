@@ -5,7 +5,8 @@
 # (omarchy-mac-boot); a script install sets OMARCHY_MACOS_VM=1 to write it.
 # This leaf only installs the small omarchy-macos-vm hook and enables its
 # service, which installs the side kernel, QEMU and the rest at the next boot
-# and never changes the default boot entry. Without the request it does nothing.
+# and selects the VM kernel persistently while keeping the stock recovery entry.
+# Without the request it does nothing.
 
 omarchy-hw-aarch64-apple || return 0
 
@@ -15,8 +16,8 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../../helpers/as-roo
 macos_vm_marker="${OMARCHY_MACOS_VM_MARKER:-/etc/omarchy/macos-vm.enabled}"
 
 if [[ ${OMARCHY_MACOS_VM:-0} == "1" && ! -e $macos_vm_marker ]]; then
-  as_root install -d -m 0755 "$(dirname "$macos_vm_marker")" &&
-    printf '{"version":1,"requested_by":"install.sh"}\n' | as_root tee "$macos_vm_marker" >/dev/null
+  as_root install -d -m 0755 "$(dirname "$macos_vm_marker")" || return 1
+  printf '{"version":1,"requested_by":"install.sh"}\n' | as_root tee "$macos_vm_marker" >/dev/null || return 1
 fi
 [[ -e $macos_vm_marker ]] || return 0
 
@@ -31,14 +32,22 @@ if omarchy-pkg-missing omarchy-macos-vm; then
     fi
   done
   if [[ -n $hook_archive ]]; then
-    as_root pacman -U --needed --noconfirm "$hook_archive" ||
-      echo "Warning: could not install $hook_archive; no macOS VM setup." >&2
+    if ! as_root pacman -U --needed --noconfirm "$hook_archive"; then
+      echo "Error: could not install $hook_archive; macOS VM setup is incomplete." >&2
+      return 1
+    fi
   else
-    omarchy-pkg-add omarchy-macos-vm ||
-      echo "Warning: omarchy-macos-vm is in no repository this Mac uses; no macOS VM setup." >&2
+    if ! omarchy-pkg-add omarchy-macos-vm; then
+      echo "Error: could not install omarchy-macos-vm; macOS VM setup is incomplete." >&2
+      return 1
+    fi
   fi
 fi
-if omarchy-pkg-present omarchy-macos-vm; then
-  as_root systemctl enable omarchy-macos-vm-setup.service >/dev/null 2>&1 ||
-    echo "Warning: could not enable omarchy-macos-vm-setup.service" >&2
+if ! omarchy-pkg-present omarchy-macos-vm; then
+  echo "Error: omarchy-macos-vm is absent after installation; macOS VM setup is incomplete." >&2
+  return 1
+fi
+if ! as_root systemctl enable omarchy-macos-vm-setup.service >/dev/null 2>&1; then
+  echo "Error: could not enable omarchy-macos-vm-setup.service" >&2
+  return 1
 fi

@@ -73,6 +73,50 @@ leaf x86 "$hardware_leaf" OMARCHY_IMAGE_DEFERRED_HARDWARE=1 || fail "x86: the sy
 rm -f "$tmp/fail"
 pass "x86: the system setup leaf is a no-op, even with Mac entrypoints on disk"
 
+# A requested macOS VM must fail finalization if its hook cannot be installed
+# or enabled; a warning followed by success would silently drop the request.
+vm_bin=$tmp/vm-bin
+mkdir -p "$vm_bin"
+cat >"$vm_bin/omarchy-pkg-missing" <<'SH'
+#!/bin/bash
+[[ ! -e $VM_INSTALLED ]]
+SH
+cat >"$vm_bin/omarchy-pkg-present" <<'SH'
+#!/bin/bash
+[[ -e $VM_INSTALLED ]]
+SH
+cat >"$vm_bin/omarchy-pkg-add" <<'SH'
+#!/bin/bash
+[[ ${VM_FAIL:-} != "install" ]] || exit 1
+[[ ${VM_FAIL:-} == "absent" ]] || touch "$VM_INSTALLED"
+SH
+cat >"$vm_bin/systemctl" <<'SH'
+#!/bin/bash
+[[ ${VM_FAIL:-} != "enable" ]] || exit 1
+touch "$VM_ENABLED"
+SH
+printf '#!/bin/bash\n"$@"\n' >"$vm_bin/sudo"
+chmod +x "$vm_bin"/*
+
+vm_leaf() {
+  rm -f "$tmp/vm-installed" "$tmp/vm-enabled" "$tmp/vm-request"
+  env OMARCHY_PROC_ROOT="$tmp/apple/proc" \
+    PATH="$vm_bin:$tmp/apple/bin:$ROOT/bin:$PATH" OMARCHY_MACOS_VM=1 \
+    OMARCHY_MACOS_VM_MARKER="$tmp/vm-request" VM_INSTALLED="$tmp/vm-installed" \
+    VM_ENABLED="$tmp/vm-enabled" VM_FAIL="$1" \
+    bash -eE -c 'source "$1"' bash "$ROOT/install/hardware/apple/macos-vm.sh" >"$tmp/output" 2>&1
+}
+
+vm_leaf "" || fail "macOS VM request installs and enables the hook" "$(cat "$tmp/output")"
+[[ -f $tmp/vm-request && -f $tmp/vm-enabled ]] || fail "macOS VM request remains recorded and enabled"
+for stage in install absent enable; do
+  if vm_leaf "$stage"; then
+    fail "macOS VM $stage failure must fail the hardware leaf"
+  fi
+  [[ -f $tmp/vm-request && ! -f $tmp/vm-enabled ]] || fail "macOS VM $stage failure preserves the request without enabling an incomplete hook"
+done
+pass "macOS VM hook installation and enablement failures fail the requested setup"
+
 # ── user setup ───────────────────────────────────────────────────────────────
 
 leaf apple "$user_leaf" OMARCHY_IMAGE_ROOT="$tmp/booted" || fail "apple: the user setup leaf runs" "$(cat "$tmp/output")"
